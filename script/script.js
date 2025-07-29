@@ -3,6 +3,15 @@ const calendarUrl = "https://corsproxy.io/?https://calendar.google.com/calendar/
 let weekOffset = 0; // 0 = this week, -1 = last week, +1 = next week
 const MAX_OCCURRENCES = 20; // Prevent infinite loops for bad RRULEs
 
+function formatDuration(ms) {
+  const minutes = Math.floor(ms / 60000);
+  const hrs = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (hrs && mins) return `${hrs}h ${mins}m`;
+  if (hrs) return `${hrs}h`;
+  return `${mins}m`;
+}
+
 // --- MAIN FUNCTION ---
 
 async function fetchAndParseICS() {
@@ -31,7 +40,26 @@ async function fetchAndParseICS() {
         const event = new ICAL.Event(vevent);
         if (!event.startDate || !event.summary) return;
 
+        const baseStart = event.startDate.toJSDate();
+        let durationMs = 0;
+        if (event.endDate) {
+          durationMs = event.endDate.toJSDate() - baseStart;
+        } else if (event.duration) {
+          durationMs = event.duration.toSeconds() * 1000;
+        }
+
         const rrule = vevent.getFirstPropertyValue("rrule");
+
+        const pushEvent = (startDate) => {
+          const endDate = new Date(startDate.getTime() + durationMs);
+          const weekday = getWeekdayKey(startDate);
+          weekEvents[weekday]?.push({
+            start: startDate,
+            end: endDate,
+            summary: event.summary,
+            durationMs,
+          });
+        };
 
         if (rrule) {
           const expand = new ICAL.RecurExpansion({
@@ -45,17 +73,13 @@ async function fetchAndParseICS() {
             count++;
             const startDate = next.toJSDate();
             if (startDate >= startOfWeek && startDate <= endOfWeek) {
-              const weekday = getWeekdayKey(startDate);
-              const timeString = startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-              weekEvents[weekday]?.push({ time: timeString, summary: event.summary });
+              pushEvent(startDate);
             }
           }
         } else {
-          const startDate = event.startDate.toJSDate();
+          const startDate = baseStart;
           if (startDate >= startOfWeek && startDate <= endOfWeek) {
-            const weekday = getWeekdayKey(startDate);
-            const timeString = startDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            weekEvents[weekday]?.push({ time: timeString, summary: event.summary });
+            pushEvent(startDate);
           }
         }
       } catch (eventError) {
@@ -103,12 +127,17 @@ function renderSchedule({ weekEvents, startOfWeek }) {
       eventsContainer.textContent = "No Events";
       eventsContainer.classList.add("no-events");
     } else {
-      events.sort((a, b) => a.time.localeCompare(b.time)).forEach(event => {
-        const div = document.createElement("div");
-        div.textContent = `${event.time} - ${event.summary}`;
-        div.classList.add("event-item");
-        eventsContainer.appendChild(div);
-      });
+      events
+        .sort((a, b) => a.start - b.start)
+        .forEach(event => {
+          const div = document.createElement("div");
+          const start = event.start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const end = event.end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const duration = formatDuration(event.durationMs);
+          div.textContent = `${start} - ${end} (${duration}) - ${event.summary}`;
+          div.classList.add("event-item");
+          eventsContainer.appendChild(div);
+        });
     }
 
     dayBlock.appendChild(eventsContainer);
