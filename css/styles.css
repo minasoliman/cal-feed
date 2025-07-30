@@ -94,4 +94,8 @@ body {
     box-shadow: 0 0 10px rgba(191, 115, 85, 0.3);
   }
   
+  button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
   
